@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { QrCode, Wallet, Clock, MapPin, Plus, ChevronRight } from 'lucide-react';
 import QRCodeLib from 'qrcode';
 
 const CustomerWalletPage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavigate }) => {
+  const { user } = useAuth();
   const [qrDataUrl, setQrDataUrl] = useState('');
   const balance = 670;
   const credits = [
@@ -12,10 +14,15 @@ const CustomerWalletPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
   ];
 
   useEffect(() => {
-    QRCodeLib.toDataURL(JSON.stringify({ clientId: 'C1', nom: 'Klouvi Jean-Paul', type: 'personal' }), {
+    QRCodeLib.toDataURL(JSON.stringify({
+      clientId: user?.id || 'C1',
+      nom: `${user?.prenom || ''} ${user?.nom || ''}`.trim(),
+      telephone: user?.telephone || '',
+      type: 'personal',
+    }), {
       width: 180, margin: 2, color: { dark: '#000', light: '#fff' }, errorCorrectionLevel: 'H',
     }).then(setQrDataUrl);
-  }, []);
+  }, [user?.id]);
 
   return (
     <div style={{ animation: 'fadeUp 0.4s ease' }}>
@@ -61,7 +68,7 @@ const CustomerWalletPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
               <img src={qrDataUrl} alt="QR personnel" style={{ width: 140, height: 140, display: 'block' }} />
             </div>
           )}
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>ID: C1-KLOUVI-JP</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>ID: {user?.id}-{user?.nom?.toUpperCase().slice(0,5)}</div>
         </div>
 
         {/* Stats */}
