@@ -110,17 +110,21 @@ L’application nécessite une authentification. Il est possible de créer un co
 ## Utilisez la page se connecter entrant ces identifiant
 
 *Commerçant
+
 email : samlolo
+
 Mot de passe : sam9838*M
 
 *Client
 
 email : soso
+
 Mot de passe : sam9838*M
 
 *Paternaire
 
 email : achille
+
 Mot de passe : sam9838*M
 
 
