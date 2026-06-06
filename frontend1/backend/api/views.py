@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from .permissions import IsAdminRole
-from .models import User, Transaction, QRCodeRecord, FraudReport, CommissionRecord
+from .models import User, Transaction, QRCodeRecord, FraudReport, CommissionRecord, Location
 from .serializers import (
     UserSerializer,
     PartnerSerializer,
@@ -29,6 +29,8 @@ from .serializers import (
     DashboardSerializer,
     FraudReportSerializer,
     CommissionSerializer,
+    LocationSerializer,
+    LocationDetailSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,8 +189,49 @@ class TransactionListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         user = self.request.user
-        partner = User.objects.filter(role='partner', statut='actif').order_by('?').first()
-        transaction = serializer.save(merchant=user, partner=partner)
+        
+        # Récupérer les coordonnées du merchant
+        merchant_lat = user.latitude or 0
+        merchant_lng = user.longitude or 0
+        
+        # Fonction pour calculer la distance (Haversine)
+        def haversine_distance(lat1, lng1, lat2, lng2):
+            import math
+            R = 6371.0  # Earth radius en km
+            phi1 = math.radians(lat1)
+            phi2 = math.radians(lat2)
+            d_phi = math.radians(lat2 - lat1)
+            d_lambda = math.radians(lng2 - lng1)
+            
+            a = math.sin(d_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            return R * c
+        
+        # Chercher les locations actives des partenaires actifs
+        from .models import Location
+        nearby_locations = []
+        
+        for location in Location.objects.filter(statut='active', partner__statut='actif'):
+            distance = haversine_distance(merchant_lat, merchant_lng, location.latitude, location.longitude)
+            if distance <= 50:  # Max 50km
+                nearby_locations.append((location, distance))
+        
+        # Trier par distance croissante et prendre les 5 plus proches
+        nearby_locations.sort(key=lambda x: x[1])
+        top_locations = [loc for loc, _ in nearby_locations[:5]]
+        
+        # Sélectionner aléatoirement parmi les plus proches
+        if top_locations:
+            selected_location = random.choice(top_locations)
+            transaction = serializer.save(
+                merchant=user,
+                partner=selected_location.partner,
+                partner_location=selected_location
+            )
+        else:
+            # Fallback: partenaire aléatoire si aucune location proche
+            partner = User.objects.filter(role='partner', statut='actif').order_by('?').first()
+            transaction = serializer.save(merchant=user, partner=partner)
 
         platform_share = transaction.frais_service * Decimal('0.5')
         merchant_share = transaction.frais_service * Decimal('0.25')
@@ -419,6 +462,170 @@ class AdminCommissionView(generics.ListAPIView):
     permission_classes = [IsAdminRole]
     serializer_class = CommissionSerializer
     queryset = CommissionRecord.objects.all().order_by('-date_commission')
+
+
+class LocationListView(generics.ListCreateAPIView):
+    """Lister et créer des locations (CRUD pour partenaires)"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LocationSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'partner':
+            return Location.objects.filter(partner=user).order_by('-updated_at')
+        if user.role == 'admin':
+            return Location.objects.all().order_by('-updated_at')
+        return Location.objects.filter(statut='active').order_by('-updated_at')
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        # Les partenaires créent leurs propres locations
+        if user.role == 'partner':
+            serializer.save(partner=user)
+        else:
+            # Les admins peuvent créer des locations pour n'importe quel partenaire
+            serializer.save()
+
+
+class LocationDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Détails, mise à jour et suppression d'une location"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LocationDetailSerializer
+    queryset = Location.objects.all()
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'partner':
+            return Location.objects.filter(partner=user)
+        return Location.objects.all()
+
+    def perform_update(self, serializer):
+        # Les partenaires ne peuvent modifier que leurs locations
+        user = self.request.user
+        location = self.get_object()
+        if user.role == 'partner' and location.partner != user:
+            return Response({'detail': 'Non autorisé'}, status=status.HTTP_403_FORBIDDEN)
+        serializer.save()
+
+
+class LocationStatsView(APIView):
+    """Stats détaillées d'une location"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            location = Location.objects.get(pk=pk)
+        except Location.DoesNotExist:
+            return Response({'detail': 'Location introuvable'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Vérification de permission
+        if request.user.role == 'partner' and location.partner != request.user:
+            return Response({'detail': 'Non autorisé'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Statistiques
+        transactions = location.transactions.all()
+        today = timezone.now() - timedelta(days=1)
+        month = timezone.now() - timedelta(days=30)
+
+        total_tx = transactions.count()
+        tx_today = transactions.filter(created_at__gte=today).count()
+        revenue_today = transactions.filter(created_at__gte=today).aggregate(Sum('frais_service'))['frais_service__sum'] or 0
+        revenue_month = transactions.filter(created_at__gte=month).aggregate(Sum('frais_service'))['frais_service__sum'] or 0
+        validated_tx = transactions.filter(statut='validee').count()
+        fraud_tx = transactions.filter(fraud_reports__isnull=False).count()
+
+        taux_validation = (validated_tx / max(total_tx, 1)) * 100
+        taux_fraude = (fraud_tx / max(total_tx, 1)) * 100
+
+        return Response({
+            'location': LocationDetailSerializer(location, context={'request': request}).data,
+            'stats': {
+                'totalTransactions': total_tx,
+                'transactionsAujourd': tx_today,
+                'revenusJour': str(revenue_today),
+                'revenusMois': str(revenue_month),
+                'transactionsValidees': validated_tx,
+                'tauxValidation': round(taux_validation, 2),
+                'tauxFraude': round(taux_fraude, 2),
+                'fraudDetections': fraud_tx,
+            }
+        })
+
+
+class PartnerLocationsView(generics.ListAPIView):
+    """Liste les locations d'un partenaire spécifique (pour clients/merchants)"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LocationSerializer
+
+    def get_queryset(self):
+        partner_id = self.kwargs.get('partner_id')
+        return Location.objects.filter(partner_id=partner_id, statut='active')
+
+
+class NearbyLocationsView(APIView):
+    """Trouver les locations les plus proches du merchant (avec distance calculée)"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        # Récupérer les coordonnées du merchant
+        lat = request.query_params.get('latitude') or request.user.latitude
+        lng = request.query_params.get('longitude') or request.user.longitude
+        radius = int(request.query_params.get('radius', 10))  # 10km par défaut
+
+        if not lat or not lng:
+            return Response(
+                {'detail': 'Coordonnées (latitude, longitude) requises'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            lat = float(lat)
+            lng = float(lng)
+        except ValueError:
+            return Response(
+                {'detail': 'Latitude et longitude doivent être des nombres'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Fonction pour calculer la distance
+        import math
+        def haversine_distance(lat1, lng1, lat2, lng2):
+            R = 6371.0
+            phi1 = math.radians(lat1)
+            phi2 = math.radians(lat2)
+            d_phi = math.radians(lat2 - lat1)
+            d_lambda = math.radians(lng2 - lng1)
+            a = math.sin(d_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            return R * c
+
+        # Récupérer les locations actives
+        locations = Location.objects.filter(statut='active', partner__statut='actif')
+        nearby = []
+
+        for location in locations:
+            if location.latitude and location.longitude:
+                distance = haversine_distance(lat, lng, location.latitude, location.longitude)
+                if distance <= radius:
+                    nearby.append({
+                        'location': location,
+                        'distance': distance
+                    })
+
+        # Trier par distance
+        nearby.sort(key=lambda x: x['distance'])
+
+        # Sérialiser les locations avec distance
+        serializer = LocationSerializer(
+            [item['location'] for item in nearby],
+            many=True,
+            context={'request': request}
+        )
+
+        return Response({
+            'count': len(nearby),
+            'locations': serializer.data
+        })
 
 
 class SeedTestUsersView(APIView):

@@ -73,6 +73,7 @@ class Transaction(models.Model):
     merchant = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='merchant_transactions')
     customer = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='customer_transactions')
     partner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='partner_transactions')
+    partner_location = models.ForeignKey('Location', null=True, blank=True, on_delete=models.SET_NULL, related_name='transactions')
     montant_achat = models.DecimalField(max_digits=12, decimal_places=2)
     montant_paye = models.DecimalField(max_digits=12, decimal_places=2)
     monnaie_a_rendre = models.DecimalField(max_digits=12, decimal_places=2)
@@ -122,6 +123,44 @@ class CommissionRecord(models.Model):
 
     def __str__(self):
         return f'{self.type_commission} - {self.montant_commission}'
+
+
+class Location(models.Model):
+    """Représente une succursale/boutique d'un partenaire"""
+    STATUT_CHOICES = [
+        ('active', 'Active'),
+        ('inactive', 'Inactive'),
+        ('suspended', 'Suspendue'),
+    ]
+    
+    partner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='locations')
+    nom = models.CharField(max_length=255, help_text="Nom de la boutique (ex: Boutique Centre-Ville)")
+    adresse = models.CharField(max_length=500)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    telephone = models.CharField(max_length=20, blank=True)
+    horaires = models.CharField(max_length=100, default='9h-18h', blank=True)
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='active')
+    
+    # Métrics
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Solde par location")
+    revenus_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    nombre_transactions = models.PositiveIntegerField(default=0)
+    
+    # Audit
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = [['partner', 'adresse']]
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['partner', 'statut']),
+            models.Index(fields=['latitude', 'longitude']),
+        ]
+    
+    def __str__(self):
+        return f"{self.partner.nom_boutique} - {self.nom}"
 
 
 @receiver(post_save, sender=User)

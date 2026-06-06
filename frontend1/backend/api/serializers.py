@@ -3,7 +3,7 @@ import math
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from rest_framework import serializers
-from .models import User, Wallet, Transaction, QRCodeRecord, FraudReport, CommissionRecord
+from .models import User, Wallet, Transaction, QRCodeRecord, FraudReport, CommissionRecord, Location
 
 def normalize_phone(value):
     if value is None:
@@ -169,12 +169,14 @@ class TransactionSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     merchantName = serializers.SerializerMethodField()
     partnerName = serializers.SerializerMethodField()
+    partnerLocationId = serializers.CharField(source='partner_location.id', allow_null=True, read_only=True)
+    partnerLocationName = serializers.CharField(source='partner_location.nom', allow_null=True, read_only=True)
     customerName = serializers.SerializerMethodField()
     qrCode = serializers.CharField(source='qr_code', read_only=True)
 
     class Meta:
         model = Transaction
-        fields = ['transactionId', 'montantAchat', 'montantPaye', 'monnaieARendre', 'fraisService', 'statut', 'createdAt', 'merchantName', 'partnerName', 'customerName', 'qrCode']
+        fields = ['transactionId', 'montantAchat', 'montantPaye', 'monnaieARendre', 'fraisService', 'statut', 'createdAt', 'merchantName', 'partnerName', 'partnerLocationId', 'partnerLocationName', 'customerName', 'qrCode']
 
     def get_merchantName(self, obj):
         return f'{obj.merchant.prenom} {obj.merchant.nom}'
@@ -274,3 +276,63 @@ class CommissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = CommissionRecord
         fields = ['commissionId', 'montantCommission', 'typeCommission', 'dateCommission']
+
+
+class LocationSerializer(serializers.ModelSerializer):
+    distance = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Location
+        fields = ['id', 'partner', 'nom', 'adresse', 'latitude', 'longitude', 'telephone', 'horaires', 'statut', 'balance', 'revenus_total', 'nombre_transactions', 'distance', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'balance', 'revenus_total', 'nombre_transactions', 'created_at', 'updated_at']
+
+    def get_distance(self, obj):
+        """Calculer la distance entre la location et les coordonnées du merchant"""
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        if request is None:
+            return 0
+
+        params = getattr(request, 'query_params', {})
+        lat = params.get('lat') or params.get('latitude')
+        lng = params.get('lng') or params.get('longitude') or params.get('lon')
+
+        try:
+            if lat is None or lng is None:
+                return 0
+            lat = float(lat)
+            lng = float(lng)
+            if obj.latitude is None or obj.longitude is None:
+                return 0
+            
+            # Haversine formula
+            R = 6371.0  # Earth radius in kilometers
+            phi1 = math.radians(lat)
+            phi2 = math.radians(obj.latitude)
+            d_phi = math.radians(obj.latitude - lat)
+            d_lambda = math.radians(obj.longitude - lng)
+
+            a = math.sin(d_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            distance_km = R * c
+            return round(distance_km, 2)
+        except Exception:
+            return 0
+
+
+class LocationDetailSerializer(serializers.ModelSerializer):
+    """Serializer détaillé pour une location avec infos du partenaire"""
+    partnerInfo = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Location
+        fields = ['id', 'nom', 'adresse', 'latitude', 'longitude', 'telephone', 'horaires', 'statut', 'balance', 'revenus_total', 'nombre_transactions', 'partnerInfo', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'balance', 'revenus_total', 'nombre_transactions', 'created_at', 'updated_at']
+    
+    def get_partnerInfo(self, obj):
+        return {
+            'id': obj.partner.id,
+            'nom': f'{obj.partner.prenom} {obj.partner.nom}',
+            'email': obj.partner.email,
+            'telephone': obj.partner.telephone,
+            'statut': obj.partner.statut,
+        }
