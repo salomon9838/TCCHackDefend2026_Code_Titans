@@ -1,0 +1,62 @@
+[
+  {
+    "id": 24,
+    "email": "partner@demo.local",
+    "telephone": "+228 91234569"
+  },
+  {
+    "id": 1,
+    "email": "salomonkoumedjina@gmail.com",
+    "telephone": "92627449"
+  },
+  {
+    "id": 3,
+    "email": "paul@gmail.com",
+    "telephone": "98384403"
+  },
+  {
+    "id": 4,
+    "email": "reine@gmail.com",
+    "telephone": "90 00 00 00"
+  },
+  {
+    "id": 5,
+    "email": "jeanne@gmail.com",
+    "telephone": "+228 98 89 89 98"
+  },
+  {
+    "id": 15,
+    "email": "test-login@smartchange.local",
+    "telephone": "+228 912 345 670"
+  },
+  {
+    "id": 22,
+    "email": "merchant@demo.local",
+    "telephone": "+228 91234567"
+  },
+  {
+    "id": 23,
+    "email": "customer@demo.local",
+    "telephone": "+228 91234568"
+  },
+  {
+    "id": 28,
+    "email": "merchant@test.local",
+    "telephone": "+22391234567"
+  },
+  {
+    "id": 29,
+    "email": "customer@test.local",
+    "telephone": "+22391234568"
+  },
+  {
+    "id": 30,
+    "email": "partner@test.local",
+    "telephone": "+22391234569"
+  },
+  {
+    "id": 31,
+    "email": "debo@gmail.com",
+    "telephone": "+22892627449"
+  }
+]
