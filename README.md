@@ -111,19 +111,19 @@ L’application nécessite une authentification. Il est possible de créer un co
 
 *Commerçant
 
-email : samlolo
+email : deby@gmail.com
 
 Mot de passe : sam9838*M
 
 *Client
 
-email : soso
+email : dodji@gmail.com
 
 Mot de passe : sam9838*M
 
 *Paternaire
 
-email : achille
+email : fade@gmail.com
 
 Mot de passe : sam9838*M
 
